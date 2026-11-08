@@ -7,6 +7,9 @@ for temperature regulation in heating zones.
 
 from dataclasses import dataclass, field
 
+DUTY_MIN = 0.0
+DUTY_MAX = 100.0
+
 
 @dataclass(frozen=True)
 class PIDState:
@@ -77,18 +80,29 @@ class PIDController:
         # Proportional term
         proportional = self.kp * error
 
-        # Integral term with anti-windup
-        # Use previous integral as the integral accumulator
-        prev_integral = self._state.integral if self._state else 0.0
-        integral = prev_integral + self.ki * error * dt
-        integral = max(self.integral_min, min(self.integral_max, integral))
-
         # Derivative term - use previous error from state
         last_error = self._state.error if self._state else 0.0
         derivative = self.kd * (error - last_error) / dt
 
+        # Integral term with anti-windup
+        # Use previous integral as the integral accumulator
+        prev_integral = self._state.integral if self._state else 0.0
+        # Conditional integration: while the output is already saturated, do
+        # not integrate further in the direction of saturation. Otherwise a
+        # long rise (cold start, recovery from a setback) keeps charging the
+        # integral although the valve cannot open any wider, and the excess
+        # shows up as overshoot after the setpoint is reached.
+        unclamped = proportional + prev_integral + derivative
+        saturated_high = unclamped >= DUTY_MAX and error > 0
+        saturated_low = unclamped <= DUTY_MIN and error < 0
+        if saturated_high or saturated_low:
+            integral = prev_integral
+        else:
+            integral = prev_integral + self.ki * error * dt
+        integral = max(self.integral_min, min(self.integral_max, integral))
+
         # Output clamped to 0-100%
-        duty_cycle = max(0.0, min(100.0, proportional + integral + derivative))
+        duty_cycle = max(DUTY_MIN, min(DUTY_MAX, proportional + integral + derivative))
 
         self._state = PIDState(
             error=error,

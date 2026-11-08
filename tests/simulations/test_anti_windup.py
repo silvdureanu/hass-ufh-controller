@@ -21,13 +21,13 @@ if TYPE_CHECKING:
 class TestAntiWindup:
     """Verify integral term clamping and recovery."""
 
-    def test_integral_clamps_at_max(
+    def test_integral_does_not_wind_up_while_saturated(
         self,
         make_single_zone_system: Callable[
             ..., tuple[SimulationHarness, HeatingController, str]
         ],
     ) -> None:
-        """Unreachable setpoint should clamp integral at max (100)."""
+        """Unreachable setpoint saturates the output; the integral must not grow."""
         room = ROOM_ARCHETYPES["borderline"]
         harness, _controller, zid = make_single_zone_system(
             room, outdoor_temp=5.0, initial_temp=15.0, setpoint=21.0
@@ -37,13 +37,13 @@ class TestAntiWindup:
 
         entries = log.zone_entries_after(zid, 12 * 3600)
         integrals = [e.integral for e in entries]
+        duties = [e.duty_cycle for e in entries]
 
-        # Should be clamped at max
-        assert max(integrals) == pytest.approx(100.0, abs=0.1)
-
-        # Should stay at max consistently
-        avg_integral = sum(integrals) / len(integrals)
-        assert avg_integral >= 99.0, f"Avg integral {avg_integral:.1f} should be ~100"
+        # Output is saturated the whole time...
+        assert min(duties) == pytest.approx(100.0, abs=0.1)
+        # ...so conditional integration keeps the integral where it was
+        # when saturation began (here: 0, since P alone saturates from start)
+        assert max(integrals) <= 1.0, f"Integral wound up to {max(integrals):.1f}"
 
     def test_integral_clamped_at_zero_above_setpoint(
         self,
@@ -89,13 +89,13 @@ class TestAntiWindup:
                 f"at t={e.time:.0f}s (room={e.room_temp:.2f}°C > sp={e.setpoint}°C)"
             )
 
-    def test_integral_recovers_from_clamp(
+    def test_recovers_from_saturation_without_overshoot(
         self,
         make_single_zone_system: Callable[
             ..., tuple[SimulationHarness, HeatingController, str]
         ],
     ) -> None:
-        """Integral decreases from 100 when conditions improve."""
+        """After saturation, the room settles without overshoot once demand drops."""
         room = ROOM_ARCHETYPES["borderline"]
         harness, _controller, zid = make_single_zone_system(
             room, outdoor_temp=5.0, initial_temp=15.0, setpoint=21.0
@@ -119,23 +119,22 @@ class TestAntiWindup:
             ],
         )
 
-        # Before mutation (at hour 10-12): integral should be near max
+        # Before mutation (at hour 10-12): output saturated, integral not wound up
         entries_before = [
             e for e in log.zone_entries(zid) if 10 * 3600 <= e.time < 12 * 3600
         ]
-        if entries_before:
-            integrals_before = [e.integral for e in entries_before]
-            assert max(integrals_before) >= 95.0
+        assert entries_before
+        assert min(e.duty_cycle for e in entries_before) == pytest.approx(
+            100.0, abs=0.1
+        )
+        assert max(e.integral for e in entries_before) <= 1.0
 
-        # After mutation settles: integral should decrease significantly
-        entries_after = log.zone_entries_after(zid, 36 * 3600)
-        if entries_after:
-            integrals_after = [e.integral for e in entries_after]
-            avg_after = sum(integrals_after) / len(integrals_after)
-            assert avg_after < 90.0, (
-                f"Integral {avg_after:.1f} didn't decrease after "
-                f"outdoor warmed and setpoint lowered"
-            )
+        # After conditions improve the room settles without a wound-up integral
+        # to work off: no large overshoot above the setpoint
+        entries_after = log.zone_entries_after(zid, 12 * 3600)
+        assert entries_after
+        max_after = max(e.room_temp for e in entries_after)
+        assert max_after <= 22.0, f"Overshoot after recovery: {max_after:.2f}°C"
 
 
 class TestBackCalculation:

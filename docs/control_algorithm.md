@@ -21,7 +21,7 @@ The PID controller calculates a duty cycle (0-100%) from the temperature error (
 - **Integral term:** Ki × accumulated error over time (eliminates steady-state error)
 - **Derivative term:** Kd × rate of error change (damping, typically disabled for slow hydronic systems)
 
-**Anti-windup protection:** The integral term is clamped between configurable limits (default 0-100%) to prevent unbounded accumulation when the system cannot reach setpoint.
+**Anti-windup protection:** The integral term is clamped between configurable limits (default 0-100%) to prevent unbounded accumulation when the system cannot reach setpoint. In addition, the integral is not updated while the output is already saturated in the direction of the error (conditional integration): during a long rise at 100% duty — a cold start or the recovery from a setback — the integral holds instead of charging up, so it does not have to be worked off as overshoot once the room reaches setpoint.
 
 **Output clamping:** The final duty cycle is clamped to 0-100%.
 
