@@ -81,8 +81,9 @@ class TestSteadyStateConvergence:
         duties = [e.duty_cycle for e in entries]
         integrals = [e.integral for e in entries]
 
-        # Integral should be clamped at max (100)
-        assert max(integrals) == pytest.approx(100.0, abs=0.1)
+        # Output saturated by P alone: conditional integration keeps the
+        # integral from winding up
+        assert max(integrals) <= 1.0
 
         # Duty should be at or near 100%
         avg_duty = sum(duties) / len(duties)
@@ -107,11 +108,6 @@ class TestSteadyStateConvergence:
             f"(expected >=90%)"
         )
 
-    @pytest.mark.xfail(
-        reason="Controller overshoots ~2.7°C from cold start due to integral "
-        "accumulation during the long rise. Needs anti-windup improvement.",
-        strict=True,
-    )
     def test_cold_start_no_overshoot(
         self,
         make_single_zone_system: Callable[
