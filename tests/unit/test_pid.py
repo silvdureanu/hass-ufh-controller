@@ -73,11 +73,72 @@ class TestPIDController:
         pid = PIDController(
             kp=0.0, ki=1.0, kd=0.0, integral_min=-50.0, integral_max=100.0
         )
+        # Start with a positive integral so the output is not saturated at 0
+        pid.set_state(
+            PIDState(
+                error=0.0,
+                proportional=0.0,
+                integral=30.0,
+                derivative=0.0,
+                duty_cycle=30.0,
+            )
+        )
 
-        # Negative error should drive integral down: 1.0 * -2 * 30 = -60, clamped to -50
-        pid.update(setpoint=18.0, current=20.0, dt=30.0)
+        # Negative error drives integral down: 30 + 1.0 * -2 * 60 = -90, clamped to -50
+        pid.update(setpoint=18.0, current=20.0, dt=60.0)
         assert pid.state is not None
         assert pid.state.integral == -50.0
+
+    def test_integral_holds_while_output_saturated_high(self) -> None:
+        """Integral must not grow while the output is already at 100%."""
+        pid = PIDController(kp=50.0, ki=0.001, kd=0.0)
+
+        # Error of 5 K: P = 250% saturates the output on its own
+        for _ in range(60):
+            result = pid.update(setpoint=21.0, current=16.0, dt=60.0)
+        assert result is not None
+        assert result.duty_cycle == 100.0
+        assert pid.state is not None
+        assert pid.state.integral == 0.0
+
+    def test_integral_resumes_when_output_leaves_saturation(self) -> None:
+        """Once P drops below 100%, the integral accumulates normally again."""
+        pid = PIDController(kp=50.0, ki=0.001, kd=0.0)
+        pid.update(setpoint=21.0, current=16.0, dt=60.0)  # saturated, held at 0
+        assert pid.state is not None
+        assert pid.state.integral == 0.0
+
+        # Error of 1 K: P = 50%, not saturated -> integrate 0.001 * 1 * 60
+        result = pid.update(setpoint=21.0, current=20.0, dt=60.0)
+        assert result is not None
+        assert result.integral == pytest.approx(0.06)
+        assert result.duty_cycle == pytest.approx(50.06)
+
+    def test_integral_still_unwinds_while_saturated_high(self) -> None:
+        """A negative error may always reduce the integral, even at 100% output."""
+        pid = PIDController(kp=0.0, ki=1.0, kd=0.0, integral_max=200.0)
+        pid.set_state(
+            PIDState(
+                error=0.0,
+                proportional=0.0,
+                integral=150.0,
+                derivative=0.0,
+                duty_cycle=100.0,
+            )
+        )
+        pid.update(setpoint=20.0, current=20.5, dt=60.0)  # error -0.5 K
+        assert pid.state is not None
+        assert pid.state.integral == pytest.approx(120.0)
+
+    def test_integral_holds_while_output_saturated_low(self) -> None:
+        """Integral must not fall further while the output is already at 0%."""
+        pid = PIDController(kp=50.0, ki=1.0, kd=0.0, integral_min=-50.0)
+
+        # Error of -2 K: P = -100% pins the output at 0
+        pid.update(setpoint=18.0, current=20.0, dt=60.0)
+        assert pid.state is not None
+        assert pid.state.integral == 0.0
+        assert pid.state.duty_cycle == 0.0
 
     def test_output_clamped_at_zero(self) -> None:
         """Test that output is clamped at 0%."""

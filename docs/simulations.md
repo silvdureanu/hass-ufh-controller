@@ -61,10 +61,12 @@ hours of simulated time.
 
 - **Reachable setpoint** — well-insulated room settles within ±0.5 °C of 21 °C
 - **Moderate demand** — higher heat-loss room converges with duty cycle 35–55%
-- **Unreachable setpoint** — borderline room saturates at 100% duty; integral
-  clamps at maximum; temperature reaches the physical limit
-- **Cold start** — starting from 10 °C, the room reaches setpoint *(currently
-  xfail: integral windup causes ~2.7 °C overshoot)*
+- **Unreachable setpoint** — borderline room saturates at 100% duty; the
+  integral does not wind up while saturated; temperature reaches the physical
+  limit
+- **Cold start** — starting from 10 °C, the room reaches setpoint without
+  overshooting by more than 1 °C (conditional integration holds the integral
+  during the long rise at 100% duty)
 - **Parameter sweep** — convergence verified across 4 archetypes at multiple
   outdoor temperatures × 3 Ki gain values (covering 30–95% duty range)
 - **Heat request stability** — heat request signal does not chatter excessively
@@ -84,12 +86,16 @@ the boundary.
 
 ### Anti-Windup (`test_anti_windup.py`)
 
-The PID integral term is clamped to [0, 100] to prevent unbounded accumulation.
+The PID integral term is clamped to [0, 100], and it is not updated while the
+output is already saturated in the direction of the error (conditional
+integration).
 
-- **Clamp at maximum** — unreachable setpoint drives integral to exactly 100
+- **No windup while saturated** — an unreachable setpoint keeps the output at
+  100%, and the integral stays where it was when saturation began
 - **Clamp at zero** — room above setpoint keeps integral at 0
-- **Recovery from clamp** — after outdoor temperature warms and setpoint drops,
-  integral decreases from the maximum
+- **Recovery from saturation** — after outdoor temperature warms, the room
+  settles at setpoint without a wound-up integral to work off (no overshoot
+  above 1 °C)
 - **Back-calculation stability** — when actual valve delivery differs from PID
   output (under-delivery, over-delivery, sustained mismatch), the integral
   converges without drift
@@ -119,12 +125,11 @@ observation period.
 
 ## Known Limitations (xfail Tests)
 
-Seven tests are marked `xfail(strict=True)` — they pass only by *failing*, which
+Six tests are marked `xfail(strict=True)` — they pass only by *failing*, which
 documents genuine controller limitations without breaking CI.
 
 | Limitation | Affected tests | Root cause |
 |---|---|---|
-| Cold-start overshoot | 1 test | Integral windup during long rise from 10 °C |
 | Leaky room oscillation | 3 tests (one per Ki) | Outside UFH design envelope; high power + fast thermal response |
 | Borderline non-convergence | 3 tests (one per Ki) | Thermodynamic limit, not a bug; correctly saturates |
 

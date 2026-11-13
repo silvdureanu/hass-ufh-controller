@@ -371,7 +371,8 @@ class TestPIDIntegrationPause:
         runtime.state.window = False
 
         # PID update SHOULD accumulate integral
-        setup_zone_pid(controller, "living_room", 19.0, 60.0)
+        # 0.5 K error: P = 25 %, output not saturated, so the integral moves
+        setup_zone_pid(controller, "living_room", 20.5, 60.0)
         assert runtime.pid.state is not None
         assert runtime.pid.state.integral > initial_integral
 
@@ -463,7 +464,8 @@ class TestPIDIntegrationPause:
 
         # Resume by switching back to heat
         controller.mode = OperationMode.HEAT
-        setup_zone_pid(controller, "living_room", 19.0, 60.0)
+        # Unsaturated error (P = 25 %) so the resumed integral visibly grows
+        setup_zone_pid(controller, "living_room", 20.5, 60.0)
         assert runtime.pid.state is not None
         integral_after_resume = runtime.pid.state.integral
 
