@@ -884,7 +884,10 @@ class UFHControllerDataUpdateCoordinator(
         runtime.update_heat_state()
 
         # Update used_duration based on flow and heat performance
-        runtime.update_used_duration(dt)
+        runtime.update_used_duration(
+            dt,
+            closing_warning_duration=self._controller.config.timing.closing_warning_duration,
+        )
 
         # Sync valve state from actual HA entity
         # This ensures we detect when external factors change the valve state

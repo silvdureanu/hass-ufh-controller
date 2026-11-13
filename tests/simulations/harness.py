@@ -204,7 +204,12 @@ class SimulationHarness:
             runtime.update_heat_state()
 
             # Accumulate used duration
-            runtime.update_used_duration(dt)
+            runtime.update_used_duration(
+                dt,
+                closing_warning_duration=(
+                    self.controller.config.timing.closing_warning_duration
+                ),
+            )
 
             # Update failure state — always successful in simulation
             runtime.update_failure_state(
