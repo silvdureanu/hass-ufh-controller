@@ -61,7 +61,10 @@ At 200%, the division would yield 300 seconds, but the cap keeps the estimate at
 remaining quota.
 
 This adjustment does **not** affect the closing warning duration, which remains in scheduled heating duration
-time for stable boiler shutdown coordination.
+time for stable boiler shutdown coordination. For the same reason, a valve is only opened when its remaining quota
+exceeds `closing_warning_duration`. Otherwise the zone could never contribute to the heat request: when the
+boiler is idle the supply temperature falls and the coefficient with it, and a small remainder stretched by
+that low coefficient could pass the minimum run time check while being too small to request heat.
 
 ### Used Duration Accumulation
 
@@ -69,6 +72,10 @@ Each update cycle, `used_duration` accumulates when the zone is receiving heat:
 
 1. **Flow requirement**: Only accumulates when `flow=True` (estimated valve position ≥ 0.85)
 2. **Weighted**: `used_duration += dt × (supply_coefficient / 100)`
+   - **Except in the closing window**: once the remaining quota is at or below `closing_warning_duration`,
+     the zone no longer requests heat, the boiler stops and the supply cools. Weighting by that falling
+     coefficient would stretch the closing window far beyond its configured length (indefinitely as the
+     supply approaches room temperature), so the closing window accumulates wall clock time.
 3. **Fallback**: Without a supply sensor, uses simple time: `used_duration += dt`
 
 At each observation period boundary (default: every 2 hours) all zones' `used_duration` resets to 0

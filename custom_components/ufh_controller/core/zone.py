@@ -330,21 +330,35 @@ class ZoneRuntime:
             sc is None or sc > DEFAULT_HEAT_SUPPLY_COEFFICIENT_THRESHOLD
         )
 
-    def update_used_duration(self, dt: float) -> None:
+    def update_used_duration(
+        self, dt: float, *, closing_warning_duration: float | None = None
+    ) -> None:
         """
         Update used_duration based on flow state and supply coefficient.
 
         Only accumulates time when flow=True (valve open long enough).
-        When supply_coefficient is available, accumulation is weighted by it.
+        When supply_coefficient is available, accumulation is weighted by it,
+        except inside the closing window: once the remaining quota is at or
+        below closing_warning_duration the zone no longer requests heat, so
+        the boiler stops and the supply cools. Weighting the remainder by that
+        falling coefficient would stretch the closing window far beyond its
+        configured length (and indefinitely as the supply approaches room
+        temperature), so the closing window runs on wall clock time.
 
         Args:
             dt: Time delta since last update in seconds.
+            closing_warning_duration: Closing window length in seconds, or
+                None to weight the whole period (previous behaviour).
 
         """
         if not self.state.flow:
             return
 
-        if self.state.supply_coefficient is not None:
+        in_closing_window = (
+            closing_warning_duration is not None
+            and self.state.remaining_duration <= closing_warning_duration
+        )
+        if self.state.supply_coefficient is not None and not in_closing_window:
             # Weight by supply coefficient (converted from % to ratio)
             self.state.used_duration += dt * (self.state.supply_coefficient / 100.0)
         else:
@@ -554,6 +568,14 @@ def evaluate_zone(  # noqa: PLR0911
             estimated_runtime = remaining_quota
 
         if estimated_runtime < timing.min_run_time:
+            return ZoneAction.STAY_OFF if valve_off else ZoneAction.TURN_OFF
+
+        # The heat request only counts zones whose remaining quota exceeds
+        # closing_warning_duration (in quota time). A low supply coefficient
+        # while the boiler is idle can stretch a small remainder past
+        # min_run_time, but opening then can never raise a heat request: the
+        # valve would circulate unheated water and use up the quota.
+        if remaining_quota <= timing.closing_warning_duration:
             return ZoneAction.STAY_OFF if valve_off else ZoneAction.TURN_OFF
 
         if (

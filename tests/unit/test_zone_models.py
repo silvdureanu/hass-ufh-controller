@@ -514,6 +514,44 @@ class TestZoneRuntimeUsedDuration:
         # 100 + 60 * 0.5 = 130
         assert zone_runtime.state.used_duration == 130.0
 
+    def test_closing_window_runs_on_wall_clock(self, zone_runtime: ZoneRuntime) -> None:
+        """Inside the closing window, low coefficients don't stretch the quota."""
+        zone_runtime.state.flow = True
+        zone_runtime.state.supply_coefficient = 40.0
+        zone_runtime.state.requested_duration = 1000.0
+        zone_runtime.state.used_duration = 800.0  # 200 remaining <= 240
+
+        zone_runtime.update_used_duration(60.0, closing_warning_duration=240)
+
+        assert zone_runtime.state.used_duration == pytest.approx(860.0)
+
+    def test_outside_closing_window_is_weighted(
+        self, zone_runtime: ZoneRuntime
+    ) -> None:
+        """Before the closing window, accumulation stays coefficient-weighted."""
+        zone_runtime.state.flow = True
+        zone_runtime.state.supply_coefficient = 40.0
+        zone_runtime.state.requested_duration = 1000.0
+        zone_runtime.state.used_duration = 500.0  # 500 remaining > 240
+
+        zone_runtime.update_used_duration(60.0, closing_warning_duration=240)
+
+        # 500 + 60 * 0.4 = 524
+        assert zone_runtime.state.used_duration == pytest.approx(524.0)
+
+    def test_closing_window_without_warning_is_weighted(
+        self, zone_runtime: ZoneRuntime
+    ) -> None:
+        """Without a closing warning duration the old weighting applies."""
+        zone_runtime.state.flow = True
+        zone_runtime.state.supply_coefficient = 40.0
+        zone_runtime.state.requested_duration = 1000.0
+        zone_runtime.state.used_duration = 800.0
+
+        zone_runtime.update_used_duration(60.0)
+
+        assert zone_runtime.state.used_duration == pytest.approx(824.0)
+
     def test_reset_used_duration(self, zone_runtime: ZoneRuntime) -> None:
         """Reset clears used_duration to zero."""
         zone_runtime.state.used_duration = 5000.0

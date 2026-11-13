@@ -475,6 +475,9 @@ class TestEvaluateZoneMinRunTimeSupplyAdjustment:
             (731.0, 50.0, ZoneAction.STAY_OFF),
             # 100%: identity, 300 / 1.0 = 300s < 540 → off
             (700.0, 100.0, ZoneAction.STAY_OFF),
+            # 38.6%: 214 / 0.386 = 554s > 540, but 214 <= 240 closing warning
+            # → off (the valve could never raise a heat request)
+            (786.0, 38.6, ZoneAction.STAY_OFF),
         ],
     )
     def test_min_run_time_with_supply_adjustment(
@@ -559,3 +562,73 @@ class TestEvaluateZoneDHWBlocking:
         result = evaluate_zone(zone, controller, timing)
         # Valve should turn off - quota exhaustion takes precedence
         assert result == ZoneAction.TURN_OFF
+
+
+class TestEvaluateZoneClosingWarningGate:
+    """A valve only opens if its remaining quota can raise a heat request."""
+
+    @pytest.fixture
+    def timing(self) -> TimingConfig:
+        """Create timing config with defaults (540s min run, 240s warning)."""
+        return TimingConfig(min_run_time=540, closing_warning_duration=240)
+
+    @pytest.fixture
+    def controller(self) -> ControllerState:
+        """Create default controller state."""
+        return ControllerState(started_at=NOW)
+
+    @pytest.mark.parametrize(
+        ("used_duration", "supply_coefficient", "expected"),
+        [
+            # 240 remaining equals the warning: no heat request possible → off
+            (760.0, 40.0, ZoneAction.STAY_OFF),
+            # 241 remaining (estimate 602s) can request heat → on
+            (759.0, 40.0, ZoneAction.TURN_ON),
+            # Idle boiler, very low coefficient: 200 remaining → off
+            (800.0, 10.0, ZoneAction.STAY_OFF),
+        ],
+    )
+    def test_opening_requires_quota_above_closing_warning(
+        self,
+        timing: TimingConfig,
+        controller: ControllerState,
+        used_duration: float,
+        supply_coefficient: float,
+        expected: ZoneAction,
+    ) -> None:
+        """Remaining quota at or below the closing warning keeps the valve shut."""
+        zone = ZoneState(
+            zone_id="test",
+            valve_state=ValveState.OFF,
+            requested_duration=1000.0,
+            used_duration=used_duration,
+            supply_coefficient=supply_coefficient,
+        )
+        assert evaluate_zone(zone, controller, timing) == expected
+
+    def test_open_valve_in_closing_window_stays_on(
+        self, timing: TimingConfig, controller: ControllerState
+    ) -> None:
+        """An open valve still runs out its quota (closing window unchanged)."""
+        zone = ZoneState(
+            zone_id="test",
+            valve_state=ValveState.ON,
+            requested_duration=1000.0,
+            used_duration=800.0,
+            supply_coefficient=40.0,
+        )
+        assert evaluate_zone(zone, controller, timing) == ZoneAction.STAY_ON
+
+    def test_larger_warning_than_min_run_without_supply_sensor(
+        self, controller: ControllerState
+    ) -> None:
+        """Without a supply sensor the gate also applies to the raw quota."""
+        timing = TimingConfig(min_run_time=240, closing_warning_duration=300)
+        zone = ZoneState(
+            zone_id="test",
+            valve_state=ValveState.OFF,
+            requested_duration=1000.0,
+            used_duration=720.0,  # 280 remaining: >= min run, <= warning
+            supply_coefficient=None,
+        )
+        assert evaluate_zone(zone, controller, timing) == ZoneAction.STAY_OFF

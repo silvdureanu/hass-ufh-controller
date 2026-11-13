@@ -56,7 +56,7 @@ Heat accounting tracks how much of its quota each zone has consumed during the o
 
 **Key concepts:**
 - `used_duration` accumulates only when `flow=True` (valve confirmed open)
-- When a supply temperature sensor is configured, accumulation is weighted by the supply coefficient
+- When a supply temperature sensor is configured, accumulation is weighted by the supply coefficient, except in the closing window (remaining quota ≤ `closing_warning_duration`), which runs on wall clock time
 - At period boundaries, all zones reset to fresh quota
 
 See [Heat Accounting](heat_accounting.md) for detailed documentation.
@@ -78,6 +78,9 @@ The zone evaluation follows a priority-based decision tree:
      (capped at remaining quota so coefficients above 100% never shorten the estimate):
      `estimated_runtime = max(remaining_quota, remaining_quota / (supply_coefficient / 100))`.
      Without a supply sensor, remaining quota is compared directly.
+   - If remaining quota is at or below `closing_warning_duration`: stay off. Such a zone could
+     never raise a heat request, so opening it would only circulate unheated water and use up
+     its quota.
    - If `dhw_priority` is `partial` (the default), DHW is active and this is a regular circuit currently off: stay off. Circuits already running are left alone; `parallel` skips this check entirely.
    - Otherwise: turn on
 
